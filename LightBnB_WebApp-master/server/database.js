@@ -79,7 +79,6 @@ exports.addUser = addUser;
  * @return {Promise<[{}]>} A promise to the reservations.
  */
 const getAllReservations = function(guest_id, limit = 10) {
-  // return getAllProperties(null, 2);
   return pool
   .query(`SELECT reservations.*, properties.*, AVG(property_reviews.rating) AS average_rating
   FROM reservations
@@ -98,21 +97,85 @@ exports.getAllReservations = getAllReservations;
 
 /// Properties
 
-// /**
-//  * Get all properties.
-//  * @param {{}} options An object containing query options.
-//  * @param {*} limit The number of results to return.
-//  * @return {Promise<[{}]>}  A promise to the properties.
-//  */
+/**
+ * Get all properties.
+ * @param {{}} options An object containing query options.
+ * @param {*} limit The number of results to return.
+ * @return {Promise<[{}]>}  A promise to the properties.
+ */
 const getAllProperties = function(options, limit = 10) {
-  return pool
-    .query(`SELECT * FROM properties LIMIT $1`, [limit])
-    .then((result) => {
-      return result.rows;
-    })
-    .catch((err) => {
-      console.log(err.message);
-    });
+  const queryParams = [];
+
+  let queryString = `
+  SELECT properties.*, avg(property_reviews.rating) as average_rating
+  FROM properties
+  JOIN property_reviews ON properties.id = property_id
+  `;  
+
+  let whereString = "";
+  
+  // build up queryString if there are options passed into search
+  if (Object.keys(options).length > 0) {
+    queryString += `WHERE `;
+
+    if (options.city) {
+      queryParams.push(`%${options.city}%`);
+      if (whereString !== "") {
+        whereString += `AND city LIKE $${queryParams.length} `;
+      } else {
+        whereString += `city LIKE $${queryParams.length} `;
+      }
+    }
+
+    if (options.owner_id) {
+      queryParams.push(options.owner_id);
+      if (whereString !== "") {
+        whereString += `AND owner_id = $${queryParams.length} `;
+      } else {
+        whereString += `owner_id = $${queryParams.length} `;
+      }
+    }
+
+    if (options.minimum_price_per_night) {
+      queryParams.push(options.minimum_price_per_night * 100);
+      if (whereString !== "") {
+        whereString += `AND cost_per_night >= $${queryParams.length} `;
+      } else {
+        whereString += `cost_per_night >= $${queryParams.length} `;
+      }
+
+    }
+
+    if (options.maximum_price_per_night) {
+      queryParams.push(options.maximum_price_per_night * 100);
+      if (whereString !== "") {
+        whereString += `AND cost_per_night <= $${queryParams.length} `;
+      } else {
+        whereString += `cost_per_night <= $${queryParams.length} `;
+      }
+    }
+    queryString += whereString;
+  }
+
+  queryString += `GROUP BY properties.id`;
+  
+  //Add HAVING for the minimum rating to make sure we're pulling the average rating and not just a single rating. This was a bug we noticed while adding rating to the WHERE call.
+
+  if (options.minimum_rating) {
+    queryParams.push(options.minimum_rating);
+    queryString += `
+    HAVING AVG(property_reviews.rating) >= $${queryParams.length} `
+  }
+
+  queryParams.push(limit);
+  queryString += `
+  ORDER BY cost_per_night
+  LIMIT $${queryParams.length}`;
+  
+
+  console.log(queryString, queryParams);
+  return pool.query(queryString, queryParams).then((res) => {
+    return res.rows});
 };
 exports.getAllProperties = getAllProperties;
 
